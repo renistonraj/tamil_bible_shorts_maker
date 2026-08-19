@@ -1,0 +1,1 @@
+The Windows FFmpeg/FFprobe command wrappers are part of the rendering fix. They do not change the UI or rendering pipeline; they make the existing server commands resolvable on Windows installations where FFmpeg is not on PATH.

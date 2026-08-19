@@ -1,0 +1,1 @@
+Windows fix included: the application calls both ffmpeg and ffprobe. If those commands are not on PATH, TTS can generate audio but the API can still return an error because ffprobe cannot verify duration, and video compilation can fail because ffmpeg cannot be launched. The included command wrappers resolve common Windows FFmpeg installations and support FFMPEG_PATH.

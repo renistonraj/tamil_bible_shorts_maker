@@ -1,0 +1,1 @@
+The render/audio issue on Windows is addressed by adding ffmpeg.cmd and ffprobe.cmd wrappers. These make the existing ffmpeg/ffprobe commands work when FFmpeg is installed in common Windows locations but not on PATH.

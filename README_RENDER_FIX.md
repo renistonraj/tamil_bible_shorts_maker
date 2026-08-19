@@ -1,0 +1,1 @@
+Rendering and TTS on Windows require FFmpeg and FFprobe to be callable by the Node server. The server invokes `ffmpeg` for video compilation and `ffprobe` to validate generated audio duration. `ffmpeg.cmd` and `ffprobe.cmd` are included at repository root and support common Windows installation locations plus the `FFMPEG_PATH` environment variable.
