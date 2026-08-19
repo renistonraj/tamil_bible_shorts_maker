@@ -1,0 +1,1 @@
+The renderer uses ffmpeg and ffprobe. Windows wrappers are included to resolve them from common installation paths or FFMPEG_PATH.
