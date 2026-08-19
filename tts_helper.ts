@@ -24,12 +24,7 @@ function isSupportedVoice(voice: string): boolean {
   return /^[a-z]{2,3}-[A-Z]{2,3}-[A-Za-z]+(?:Neural|MultilingualNeural)$/i.test(voice);
 }
 
-/**
- * Generate MP3 audio using the Edge TTS websocket protocol.
- * The previous implementation could silently write incomplete audio when the
- * socket closed early. This version validates the stream and cleans up files
- * on every failure path.
- */
+/** Generate MP3 audio using the Edge TTS websocket protocol. */
 export function generateEdgeTTS(
   text: string,
   voice: string,
@@ -54,14 +49,15 @@ export function generateEdgeTTS(
     let finished = false;
     let settled = false;
     let closeTimer: NodeJS.Timeout | null = null;
+    let ws: WebSocket;
 
     const fail = (error: Error) => {
       if (settled) return;
       settled = true;
       if (closeTimer) clearTimeout(closeTimer);
-      try { ws.close(); } catch { /* ignore cleanup errors */ }
+      try { ws?.close(); } catch { /* cleanup */ }
       if (fs.existsSync(outputFile)) {
-        try { fs.unlinkSync(outputFile); } catch { /* ignore cleanup errors */ }
+        try { fs.unlinkSync(outputFile); } catch { /* cleanup */ }
       }
       reject(error);
     };
@@ -88,7 +84,7 @@ export function generateEdgeTTS(
       }
     };
 
-    const ws = new WebSocket(wsUrl, {
+    ws = new WebSocket(wsUrl, {
       headers: {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
         Origin: "chrome-extension://jdiccldimpdaibocandgnbnoatgfbyco",
@@ -123,7 +119,6 @@ export function generateEdgeTTS(
             },
           },
         });
-
         ws.send(configHeader + configBody);
 
         const ssmlHeader = [
@@ -135,8 +130,7 @@ export function generateEdgeTTS(
           "",
         ].join("\r\n");
 
-        const xmlText = escapeXml(cleanText);
-        const ssmlBody = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${escapeXml(cleanVoice)}'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>${xmlText}</prosody></voice></speak>`;
+        const ssmlBody = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${escapeXml(cleanVoice)}'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>${escapeXml(cleanText)}</prosody></voice></speak>`;
         ws.send(ssmlHeader + ssmlBody);
 
         closeTimer = setTimeout(() => {
