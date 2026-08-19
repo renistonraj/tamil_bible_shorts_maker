@@ -1,0 +1,1 @@
+The render pipeline requires ffmpeg and ffprobe to be callable by the Node server. The Windows wrappers in this branch resolve common installations and FFMPEG_PATH.
