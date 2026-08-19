@@ -1,0 +1,1 @@
+FFmpeg and FFprobe are required by the existing renderer/TTS validation path. Use render_test.cmd before rendering. If needed, set FFMPEG_PATH to the full ffmpeg.exe path.
