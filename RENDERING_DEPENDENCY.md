@@ -1,0 +1,1 @@
+Windows rendering and TTS duration verification depend on FFmpeg and FFprobe. The included wrappers resolve common FFmpeg locations and FFMPEG_PATH.
