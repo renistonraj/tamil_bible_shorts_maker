@@ -1,14 +1,17 @@
+import { createHash, randomBytes } from "node:crypto";
 import WebSocket from "ws";
 import fs from "fs";
 import path from "path";
 
 const EDGE_TTS_TOKEN = "6A5AA1D4EAFF4E9FB37E23D68491D6F4";
-const EDGE_TTS_URL = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/cognitive/v1";
+const EDGE_TTS_URL = "wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1";
+// Keep this aligned with a current Chromium build. Edge TTS now validates the
+// Sec-MS-GEC token against the browser version as well as the request time.
+const CHROMIUM_FULL_VERSION = process.env.EDGE_TTS_CHROMIUM_VERSION || "143.0.3650.75";
+const CHROMIUM_MAJOR_VERSION = CHROMIUM_FULL_VERSION.split(".")[0];
 
 function uuidv4(): string {
-  return "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx".replace(/[x]/g, () =>
-    ((Math.random() * 16) | 0).toString(16),
-  );
+  return randomBytes(16).toString("hex");
 }
 
 function escapeXml(value: string): string {
@@ -21,10 +24,26 @@ function escapeXml(value: string): string {
 }
 
 function isSupportedVoice(voice: string): boolean {
-  return /^[a-z]{2,3}-[A-Z]{2,3}-[A-Za-z]+(?:Neural|MultilingualNeural)$/i.test(voice);
+  return /^[a-z]{2,3}-[A-Z]{2,3}(?:-[A-Za-z]+)+Neural(?:HD|Multilingual)?$/i.test(voice);
 }
 
-/** Generate MP3 audio using the Edge TTS websocket protocol. */
+/**
+ * Edge TTS requires a time-windowed Sec-MS-GEC token. The old implementation
+ * only sent TrustedClientToken + ConnectionId, which now results in HTTP 400
+ * during the WebSocket handshake.
+ */
+function generateSecMsGec(): string {
+  const unixSeconds = Math.floor(Date.now() / 1000);
+  const windowsEpochSeconds = unixSeconds + 11644473600;
+  const roundedSeconds = windowsEpochSeconds - (windowsEpochSeconds % 300);
+  const windowsTicks = roundedSeconds * 10_000_000;
+  return createHash("sha256")
+    .update(`${windowsTicks}${EDGE_TTS_TOKEN}`, "utf8")
+    .digest("hex")
+    .toUpperCase();
+}
+
+/** Generate MP3 audio using the current Edge TTS websocket protocol. */
 export function generateEdgeTTS(
   text: string,
   voice: string,
@@ -44,7 +63,8 @@ export function generateEdgeTTS(
     }
 
     const requestId = uuidv4();
-    const wsUrl = `${EDGE_TTS_URL}?TrustedClientToken=${EDGE_TTS_TOKEN}&ConnectionId=${requestId}`;
+    const secMsGec = generateSecMsGec();
+    const wsUrl = `${EDGE_TTS_URL}?TrustedClientToken=${EDGE_TTS_TOKEN}&Sec-MS-GEC=${secMsGec}&Sec-MS-GEC-Version=1-${CHROMIUM_FULL_VERSION}&ConnectionId=${requestId}`;
     const audioBuffers: Buffer[] = [];
     let finished = false;
     let settled = false;
@@ -86,8 +106,11 @@ export function generateEdgeTTS(
 
     ws = new WebSocket(wsUrl, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36 Edg/120.0.0.0",
-        Origin: "chrome-extension://jdiccldimpdaibocandgnbnoatgfbyco",
+        "User-Agent": `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROMIUM_MAJOR_VERSION}.0.0.0 Safari/537.36 Edg/${CHROMIUM_MAJOR_VERSION}.0.0.0`,
+        "Origin": "chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold",
+        "Pragma": "no-cache",
+        "Cache-Control": "no-cache",
+        "Accept-Language": "en-US,en;q=0.9",
       },
       handshakeTimeout: 15000,
     });
@@ -96,41 +119,37 @@ export function generateEdgeTTS(
       try {
         const timestamp = new Date().toISOString();
         const configHeader = [
-          "Path: speech.config",
-          `X-RequestId: ${requestId}`,
-          `X-Timestamp: ${timestamp}`,
-          "Content-Type: application/json",
+          "Content-Type:application/json; charset=utf-8",
+          "Path:speech.config",
           "",
           "",
         ].join("\r\n");
 
         const configBody = JSON.stringify({
           context: {
-            system: {
-              name: "SpeechSDK",
-              version: "1.30.0",
-              build: "JavaScript",
-              lang: "JavaScript",
-            },
-            os: {
-              platform: process.platform === "win32" ? "Windows" : process.platform,
-              name: "Chrome",
-              version: "120.0",
+            synthesis: {
+              audio: {
+                metadataoptions: {
+                  sentenceBoundaryEnabled: "false",
+                  wordBoundaryEnabled: "false",
+                },
+                outputFormat: "audio-24khz-48kbitrate-mono-mp3",
+              },
             },
           },
         });
         ws.send(configHeader + configBody);
 
         const ssmlHeader = [
-          "Path: ssml",
-          `X-RequestId: ${requestId}`,
-          `X-Timestamp: ${timestamp}`,
-          "Content-Type: application/ssml+xml",
+          `X-RequestId:${requestId}`,
+          "Content-Type:application/ssml+xml",
+          `X-Timestamp:${timestamp}Z`,
+          "Path:ssml",
           "",
           "",
         ].join("\r\n");
 
-        const ssmlBody = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en-US'><voice name='${escapeXml(cleanVoice)}'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>${escapeXml(cleanText)}</prosody></voice></speak>`;
+        const ssmlBody = `<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xmlns:mstts='https://www.w3.org/2001/mstts' xml:lang='en-US'><voice name='${escapeXml(cleanVoice)}'><prosody pitch='+0Hz' rate='+0%' volume='+0%'>${escapeXml(cleanText)}</prosody></voice></speak>`;
         ws.send(ssmlHeader + ssmlBody);
 
         closeTimer = setTimeout(() => {
@@ -141,35 +160,42 @@ export function generateEdgeTTS(
       }
     });
 
-    ws.on("message", (data: WebSocket.Data) => {
+    ws.on("message", (data: WebSocket.Data, isBinary: boolean) => {
       try {
-        if (Buffer.isBuffer(data)) {
-          const headerText = data.toString("utf8", 0, Math.min(data.length, 256));
-          if (headerText.includes("Path:audio")) {
-            const separator = Buffer.from("\r\n\r\n");
-            const bodyStart = data.indexOf(separator);
-            if (bodyStart >= 0) {
-              const audioChunk = data.subarray(bodyStart + separator.length);
-              if (audioChunk.length > 0) audioBuffers.push(audioChunk);
-            }
+        const buffer = Buffer.isBuffer(data)
+          ? data
+          : Array.isArray(data)
+            ? Buffer.concat(data)
+            : Buffer.from(data as any);
+
+        if (isBinary || Buffer.isBuffer(data)) {
+          const headerText = buffer.toString("utf8", 0, Math.min(buffer.length, 512));
+          const separator = Buffer.from("\r\n\r\n");
+          const bodyStart = buffer.indexOf(separator);
+          if (bodyStart >= 0 && /Path:audio\r\n/i.test(headerText)) {
+            const audioChunk = buffer.subarray(bodyStart + separator.length);
+            if (audioChunk.length > 0) audioBuffers.push(audioChunk);
           }
-        } else {
-          const message = data.toString();
-          if (message.includes("Path:turn.end")) {
-            finished = true;
-            ws.close();
-          }
-          if (message.includes("Path:response") && message.toLowerCase().includes("error")) {
-            fail(new Error(`Edge TTS response error: ${message.slice(0, 500)}`));
-          }
+          return;
+        }
+
+        const message = buffer.toString("utf8");
+        if (message.includes("Path:turn.end")) {
+          finished = true;
+          try { ws.close(); } catch { /* cleanup */ }
         }
       } catch (error: any) {
         fail(error instanceof Error ? error : new Error(String(error)));
       }
     });
 
-    ws.on("error", (error) => {
-      fail(error instanceof Error ? error : new Error(String(error)));
+    ws.on("error", (error: any) => {
+      const code = error?.code ? ` (${error.code})` : "";
+      fail(new Error(`Edge TTS WebSocket error${code}: ${error?.message || String(error)}`));
+    });
+
+    ws.on("unexpected-response", (_request, response) => {
+      fail(new Error(`Edge TTS handshake failed: HTTP ${response.statusCode} ${response.statusMessage || ""}. The Sec-MS-GEC/Chromium protocol parameters were rejected.`));
     });
 
     ws.on("close", () => {
