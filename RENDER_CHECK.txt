@@ -1,0 +1,1 @@
+Run render_test.cmd on Windows. It verifies that ffmpeg and ffprobe are available to the server process.
