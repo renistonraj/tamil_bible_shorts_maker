@@ -1,0 +1,6 @@
+{
+  "name": "Bible Verse Video Studio",
+  "description": "A professional desktop-style video generation software for Bible verses with custom SQLite databases, fonts, neural TTS, dynamic templates, frames, and FFmpeg video export.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
